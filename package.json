@@ -2,7 +2,7 @@
   "name": "annotation-viewer",
   "displayName": "Annotation Viewer",
   "description": "Image viewer with annotation overlay support for VS Code",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "claude-code",
   "repository": {
     "type": "git",

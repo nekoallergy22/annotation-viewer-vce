@@ -132,6 +132,10 @@ export function activate(context: vscode.ExtensionContext) {
                     case 'alert':
                         vscode.window.showErrorMessage(message.text);
                         return;
+                    case 'showInExplorer':
+                        const filePath = path.join(dirPath, message.filename);
+                        vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
+                        return;
                 }
             },
             undefined,
@@ -420,8 +424,8 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
             justify-content: center;
         }
         .fullscreen-image {
-            max-width: 95%;
-            max-height: 90%;
+            max-width: 90%;
+            max-height: 85%;
             object-fit: contain;
             cursor: grab;
             transition: transform 0.1s ease;
@@ -430,9 +434,14 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
             cursor: grabbing;
         }
         .fullscreen-filename {
-            margin-top: 20px;
+            position: absolute;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
             font-size: 16px;
             color: #fff;
+            z-index: 1002;
+            text-align: center;
         }
         .navigation {
             position: absolute;
@@ -584,7 +593,7 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
         }
         .current-annotation-info {
             position: absolute;
-            top: 70px;
+            top: 160px;
             right: 20px;
             background-color: rgba(30, 30, 30, 0.9);
             padding: 10px;
@@ -592,17 +601,75 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
             font-size: 12px;
             max-width: 200px;
         }
+        .annotation-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 2px 0;
+        }
+        .annotation-checkbox {
+            margin: 0;
+        }
+        .annotation-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+        .annotation-highlight {
+            border-color: #fff !important;
+            border-width: 4px !important;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+        }
+        .annotation-controls {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 120px;
+        }
+        .annotation-text-toggle {
+            background-color: #6610f2;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            width: 100%;
+        }
+        .annotation-text-toggle.disabled {
+            background-color: #6c757d;
+        }
+        .annotation-toggle {
+            width: 100%;
+        }
+        .iscrowd-toggle {
+            background-color: #fd7e14;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            width: 100%;
+        }
+        .iscrowd-toggle.disabled {
+            background-color: #6c757d;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>Annotation Viewer</h1>
-            <div class="directory-path">Path: ${dirPath}</div>
+            <div class="directory-path">
+                <div>Image Path: ${dirPath}</div>
+                ${jsonFilePaths.length > 0 ? `<div>JSON Path: ${jsonFilePaths[0]}</div>` : ''}
+            </div>
             <div class="stats">
                 <span class="stat-item">Images: ${imageData.length}</span>
                 <span class="stat-item">Annotations: ${getTotalAnnotations(imageData)}</span>
-                <span class="stat-item">JSON Files: ${annotationFiles.length}</span>
             </div>
         </div>
         
@@ -632,10 +699,16 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
         <div class="current-annotation-info" id="currentAnnotationInfo" style="display: none;">
             <div id="annotationDetails"></div>
         </div>
+        <div class="annotation-controls" id="annotationControls">
+            <button class="annotation-toggle" id="fullscreenAnnotationToggle">Annotations: ON</button>
+            <button class="annotation-text-toggle" id="annotationTextToggle">Text: ON</button>
+            <button class="iscrowd-toggle" id="iscrowdToggle">Crowd: OFF</button>
+        </div>
         <div class="navigation">
             <div class="nav-left">
                 <button class="nav-button" id="prevButton">←</button>
                 <button class="nav-button" id="nextButton">→</button>
+                <div style="width: 20px;"></div>
             </div>
             <div class="nav-center">
                 <span class="counter" id="navigationCounter">1 / ${imageData.length}</span>
@@ -650,7 +723,6 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
                     <option value="2000">2s</option>
                 </select>
                 <button class="repeat-toggle active" id="repeatToggle">Repeat: ON</button>
-                <button class="annotation-toggle" id="fullscreenAnnotationToggle">Annotations: ON</button>
             </div>
         </div>
     </div>
@@ -669,6 +741,11 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
         let playInterval = null;
         let isRepeatMode = true;
         let showAnnotations = true;
+        let showAnnotationText = true;
+        let hiddenAnnotations = new Set();
+        let showIscrowd = false;
+        let hoveredAnnotationId = null;
+        const defaultScale = 1.5;
         
         const fullscreenView = document.getElementById('fullscreenView');
         const fullscreenImage = document.getElementById('fullscreenImage');
@@ -684,6 +761,8 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
         const repeatToggle = document.getElementById('repeatToggle');
         const annotationOverlay = document.getElementById('annotationOverlay');
         const fullscreenAnnotationToggle = document.getElementById('fullscreenAnnotationToggle');
+        const annotationTextToggle = document.getElementById('annotationTextToggle');
+        const iscrowdToggle = document.getElementById('iscrowdToggle');
         const currentAnnotationInfo = document.getElementById('currentAnnotationInfo');
         const annotationDetails = document.getElementById('annotationDetails');
         
@@ -693,11 +772,22 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
                 const index = parseInt(item.dataset.index);
                 openFullscreen(index);
             });
+            
+            // Right-click context menu for grid items
+            item.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const index = parseInt(item.dataset.index);
+                const filename = imageData[index].filename;
+                vscode.postMessage({
+                    command: 'showInExplorer',
+                    filename: filename
+                });
+            });
         });
         
         function openFullscreen(index) {
             currentIndex = index;
-            scale = 1;
+            scale = defaultScale;
             translateX = 0;
             translateY = 0;
             updateFullscreenImage();
@@ -731,7 +821,7 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
             nextButton.disabled = currentIndex === imageData.length - 1;
             
             // Reset transform when changing images
-            scale = 1;
+            scale = defaultScale;
             translateX = 0;
             translateY = 0;
             updateImageTransform();
@@ -763,6 +853,11 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
             
             img.annotations.forEach((annotation, index) => {
                 if (annotation.bbox) {
+                    // Check iscrowd filter
+                    if (!showIscrowd && annotation.iscrowd === 1) {
+                        return; // Skip crowd annotations when disabled
+                    }
+                    
                     const [x, y, width, height] = annotation.bbox;
                     
                     // Calculate base scaling from image natural size to display size
@@ -787,16 +882,28 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
                     const finalX = scaledAnnotationCenterX - finalWidth / 2 + translateX;
                     const finalY = scaledAnnotationCenterY - finalHeight / 2 + translateY;
                     
+                    // Check if this annotation is hidden
+                    const annotationId = \`\${currentIndex}-\${index}\`;
+                    if (hiddenAnnotations.has(annotationId)) {
+                        return; // Skip rendering this annotation
+                    }
+                    
                     const box = document.createElement('div');
                     box.className = 'annotation-box';
+                    box.id = \`annotation-box-\${annotationId}\`;
                     box.style.left = finalX + 'px';
                     box.style.top = finalY + 'px';
                     box.style.width = finalWidth + 'px';
                     box.style.height = finalHeight + 'px';
                     box.style.borderColor = getAnnotationColor(annotation.category_id || index);
                     
-                    // Add label if available
-                    if (annotation.categoryName) {
+                    // Add highlight class if this annotation is hovered
+                    if (hoveredAnnotationId === annotationId) {
+                        box.classList.add('annotation-highlight');
+                    }
+                    
+                    // Add label if available and text is enabled
+                    if (annotation.categoryName && showAnnotationText) {
                         const label = document.createElement('div');
                         label.className = 'annotation-label';
                         label.textContent = annotation.categoryName;
@@ -821,12 +928,28 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
             const annotationCount = img.annotations ? img.annotations.length : 0;
             
             if (annotationDetails && img.annotations && img.annotations.length > 0) {
-                const details = img.annotations.map((ann, index) => {
-                    const category = ann.categoryName || \`Annotation \${index + 1}\`;
-                    return \`• \${category}\`;
-                }).join('<br>');
+                // Filter annotations based on iscrowd setting
+                const filteredAnnotations = img.annotations.filter(ann => {
+                    return showIscrowd || ann.iscrowd !== 1;
+                });
                 
-                annotationDetails.innerHTML = \`<strong>Annotations (\${img.annotations.length}):</strong><br>\${details}\`;
+                const details = filteredAnnotations.map((ann, origIndex) => {
+                    const index = img.annotations.indexOf(ann); // Get original index
+                    const category = ann.categoryName || \`Annotation \${index + 1}\`;
+                    const annotationId = \`\${currentIndex}-\${index}\`;
+                    const isChecked = !hiddenAnnotations.has(annotationId);
+                    const crowdLabel = ann.iscrowd === 1 ? ' (crowd)' : '';
+                    return \`<div class="annotation-item" 
+                               onmouseenter="highlightAnnotation('\${annotationId}')"
+                               onmouseleave="unhighlightAnnotation()">
+                        <input type="checkbox" class="annotation-checkbox" id="ann-\${annotationId}" 
+                               \${isChecked ? 'checked' : ''} 
+                               onchange="toggleAnnotationVisibility('\${annotationId}')">
+                        <label for="ann-\${annotationId}">\${category}\${crowdLabel}</label>
+                    </div>\`;
+                }).join('');
+                
+                annotationDetails.innerHTML = \`<strong>Annotations (\${filteredAnnotations.length}):</strong><br>\${details}\`;
                 currentAnnotationInfo.style.display = 'block';
             } else {
                 currentAnnotationInfo.style.display = 'none';
@@ -886,7 +1009,49 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
                 fullscreenAnnotationToggle.textContent = showAnnotations ? 'Annotations: ON' : 'Annotations: OFF';
                 fullscreenAnnotationToggle.classList.toggle('disabled', !showAnnotations);
             }
+            
+            // Reset individual checkboxes based on main toggle
+            if (showAnnotations) {
+                hiddenAnnotations.clear();
+            } else {
+                // Hide all annotations for current image
+                const img = imageData[currentIndex];
+                if (img.annotations) {
+                    img.annotations.forEach((ann, index) => {
+                        const annotationId = \`\${currentIndex}-\${index}\`;
+                        hiddenAnnotations.add(annotationId);
+                    });
+                }
+            }
+            
             updateAnnotations();
+            updateAnnotationInfo();
+        }
+        
+        function toggleAnnotationText() {
+            showAnnotationText = !showAnnotationText;
+            if (annotationTextToggle) {
+                annotationTextToggle.textContent = showAnnotationText ? 'Text: ON' : 'Text: OFF';
+                annotationTextToggle.classList.toggle('disabled', !showAnnotationText);
+            }
+            updateAnnotations();
+        }
+        
+        function toggleIscrowd() {
+            showIscrowd = !showIscrowd;
+            if (iscrowdToggle) {
+                iscrowdToggle.textContent = showIscrowd ? 'Crowd: ON' : 'Crowd: OFF';
+                iscrowdToggle.classList.toggle('disabled', !showIscrowd);
+            }
+            updateAnnotations();
+            updateAnnotationInfo();
+        }
+        
+        function resetZoom() {
+            scale = defaultScale;
+            translateX = 0;
+            translateY = 0;
+            updateImageTransform();
         }
         
         // Mouse drag zoom functionality
@@ -903,17 +1068,10 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
             const deltaX = e.clientX - lastMouseX;
             const deltaY = e.clientY - lastMouseY;
             
-            if (Math.abs(deltaY) > Math.abs(deltaX)) {
-                // Vertical movement - zoom
-                const zoomFactor = deltaY > 0 ? 0.99 : 1.01;
-                scale *= zoomFactor;
-                scale = Math.max(0.1, Math.min(5, scale)); // Limit zoom range
-            } else {
-                // Horizontal movement - pan
-                if (scale > 1) {
-                    translateX += deltaX;
-                    translateY += deltaY;
-                }
+            // Only allow pan when zoomed in
+            if (scale > 1) {
+                translateX += deltaX;
+                translateY += deltaY;
             }
             
             updateImageTransform();
@@ -957,6 +1115,45 @@ function getWebviewContent(imageFiles: string[], annotationFiles: string[], dirP
         playButton.addEventListener('click', toggleSlideshow);
         repeatToggle.addEventListener('click', toggleRepeatMode);
         if (fullscreenAnnotationToggle) fullscreenAnnotationToggle.addEventListener('click', toggleAnnotations);
+        if (annotationTextToggle) annotationTextToggle.addEventListener('click', toggleAnnotationText);
+        if (iscrowdToggle) iscrowdToggle.addEventListener('click', toggleIscrowd);
+        
+        // Double-click to reset zoom
+        fullscreenImage.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            resetZoom();
+        });
+        
+        // Right-click context menu for fullscreen image
+        fullscreenImage.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const filename = imageData[currentIndex].filename;
+            vscode.postMessage({
+                command: 'showInExplorer',
+                filename: filename
+            });
+        });
+        
+        // Global function for annotation checkbox toggle
+        window.toggleAnnotationVisibility = function(annotationId) {
+            if (hiddenAnnotations.has(annotationId)) {
+                hiddenAnnotations.delete(annotationId);
+            } else {
+                hiddenAnnotations.add(annotationId);
+            }
+            updateAnnotations();
+        };
+        
+        // Global functions for annotation highlighting
+        window.highlightAnnotation = function(annotationId) {
+            hoveredAnnotationId = annotationId;
+            updateAnnotations();
+        };
+        
+        window.unhighlightAnnotation = function() {
+            hoveredAnnotationId = null;
+            updateAnnotations();
+        };
         
         // Slider event listener
         imageSlider.addEventListener('input', (e) => {
