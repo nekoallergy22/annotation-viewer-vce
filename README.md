@@ -53,7 +53,7 @@ npm run compile
 ### VSIXパッケージからのインストール
 ```bash
 # VSIXファイルからインストール
-code --install-extension annotation-viewer-0.0.1.vsix
+code --install-extension vsix/annotation-viewer-0.0.1.vsix
 ```
 
 ## 📖 使用方法
@@ -183,7 +183,7 @@ npm run compile
 npm run watch
 
 # VSIXパッケージ作成
-vsce package
+npx @vscode/vsce package --out vsix/
 ```
 
 ### デバッグ
@@ -224,5 +224,5 @@ Developer Tools → Console
 ---
 
 **開発者**: Claude Code Assistant  
-**最終更新**: 2024年6月  
+**最終更新**: 2025年6月  
 **バージョン**: 0.0.1

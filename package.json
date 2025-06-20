@@ -1,0 +1,59 @@
+{
+  "name": "annotation-viewer",
+  "displayName": "Annotation Viewer",
+  "description": "Image viewer with annotation overlay support for VS Code",
+  "version": "0.0.1",
+  "publisher": "claude-code",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/example/annotation-viewer"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": ["Other"],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:annotationViewer.openViewer"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "annotationViewer.openViewer",
+        "title": "Open Annotation Viewer"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "annotationViewer.openViewer",
+          "title": "Annotation Viewer: Open Viewer"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "annotationViewer.openViewer",
+          "title": "Open Annotation Viewer",
+          "group": "annotationviewer@1",
+          "when": "explorerResourceIsFolder && !listMultiSelection"
+        },
+        {
+          "command": "annotationViewer.openViewer",
+          "title": "Open Annotation Viewer (Selected Files)",
+          "group": "annotationviewer@2",
+          "when": "listMultiSelection && (explorerResourceIsFolder || resourceExtname == .json)"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "16.x",
+    "typescript": "^4.9.4"
+  }
+}
